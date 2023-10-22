@@ -1,28 +1,26 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
-String testeUri = "http://18.223.131.149/";//trocar url sempre que ligar o servidor
+String serverUri = "http://url/"; //change url here
 
-Future<Teste> fetchData() async {
-  final response = await http.get(Uri.parse(testeUri));
+class ApiData {
+  final List predict;
 
-  if(response.statusCode == 200){
-    return Teste.fromJson(jsonDecode(response.body));
-  }
-  else{
-    throw Exception('Failed to fetch data');
-  }
+  ApiData.fromJson(Map<String, dynamic> json)
+    : predict = json['predict'];
 }
 
-Future<Teste2> predictImage(String image) async {
+Future<ApiData> predictImage(String image) async {
   File myImage = File(image);
 
   var request = http.MultipartRequest(
     'POST',
-    Uri.parse("${testeUri}detect"),
+    Uri.parse("${serverUri}detect"),
   );
 
   Map<String, String> headers = {"Content-type": "multipart/form-data"};
@@ -38,33 +36,45 @@ Future<Teste2> predictImage(String image) async {
   );
 
   request.headers.addAll(headers);
-  print("request: " + request.toString());
   var res = await request.send();
-  print("this is response: " + res.toString());
   http.Response response = await http.Response.fromStream(res);
 
-  print(response.body);
-
   if(response.statusCode == 200){
-    return Teste2.fromJson(jsonDecode(response.body));
+    return ApiData.fromJson(jsonDecode(response.body));
   }
   else{
     throw Exception('Failed to send image');
   }
 }
 
-class Teste {
-  final String connection;
+class MyPainter extends CustomPainter{
 
-  Teste.fromJson(Map<String, dynamic> json)
-    : connection = json['connection'];
-}
+  MyPainter({
+    required this.img,
+    required this.points,
+  });
 
-class Teste2 {
-  final List predict;
+  final ui.Image img;
+  final List points;
 
-  Teste2.fromJson(Map<String, dynamic> json)
-    : predict = json['predict'];
+  @override
+  void paint(Canvas canvas, Size size){
+    canvas.drawImage(img, Offset.zero, Paint());
+
+    canvas.drawRect(
+      Rect.fromPoints(
+        Offset(points[0], points[1]),
+        Offset(points[2], points[3]),
+      ),
+      Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..color = Colors.green,
+    );
+  }
+
+  @override
+  bool shouldRepaint(MyPainter oldDelegate) => false;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -79,14 +89,64 @@ class ImagePage extends StatefulWidget {
 }
 
 class _ImagePageState extends State<ImagePage> {
-  //late Future<Teste> futureTeste;
-  late Future<Teste2> futureTeste;
+  late Future<ApiData> _futureRequest;
+  late ui.Image _myImage;
+
+  Future<ui.Image> convertImage() async {
+    var image = File(widget.imagePath);
+    final Uint8List bytes = await image.readAsBytes();
+    ui.Codec codec = await ui.instantiateImageCodec(bytes);
+    ui.FrameInfo frame = await codec.getNextFrame();
+
+    return frame.image;
+  }
 
   @override
   void initState(){
     super.initState();
-    //futureTeste = fetchData();
-    futureTeste = predictImage(widget.imagePath);
+    _futureRequest = predictImage(widget.imagePath);
+    convertImage().then((value) {
+      _myImage = value;
+    });
+  }
+
+  Widget markDetected(ApiData? values) {
+    return FittedBox(
+      child: Column(
+        children: [
+          Text(
+          values?.predict[0][0],
+          style: const TextStyle(
+            color: Colors.green,
+            fontSize: 15.0,
+          ),
+        ),
+          SizedBox(
+            width: 720,
+            height: 1280,
+            child: CustomPaint(
+              painter: MyPainter(img: _myImage ,points: values?.predict[0][1]),
+              size: const Size.square(720),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget noDetection(){
+    return Column(
+      children: [
+        const Text(
+          "Nada encontrado",
+          style: TextStyle(
+            color: Colors.red,
+            fontSize: 15.0,
+          ),
+        ),
+        Image.file(File(widget.imagePath)),
+      ],
+    );
   }
   
   @override
@@ -97,11 +157,12 @@ class _ImagePageState extends State<ImagePage> {
         children: [
           Expanded(
             child: FutureBuilder(
-                future:futureTeste,
+                future:_futureRequest,
                 builder: (context, snapshot) {
                   if(snapshot.hasData){
-                    print(futureTeste.toString());
-                    return Image.file(File(widget.imagePath));
+                    return snapshot.data!.predict.isEmpty
+                      ? noDetection()
+                      : markDetected(snapshot.data);
                   }
                   if(snapshot.hasError){
                     return Text('${snapshot.error}');
