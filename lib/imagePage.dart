@@ -138,7 +138,7 @@ class _ImagePageState extends State<ImagePage> {
     return Column(
       children: [
         const Text(
-          "Nada encontrado",
+          "Nothing found",
           style: TextStyle(
             color: Colors.red,
             fontSize: 15.0,
